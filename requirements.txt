@@ -1,0 +1,31 @@
+# Core dependencies
+python-dotenv==1.0.0
+langchain==0.0.267
+langchain-openai==0.0.2
+openai==1.12.0  # Updated for assistants API and audio features
+lightrag-hku==1.2.2
+pydantic==2.4.2
+fastapi==0.104.1
+uvicorn==0.23.2
+
+# Document processing
+unstructured==0.10.30
+pypdf==3.17.0
+python-docx==0.8.11
+pytesseract==0.3.10
+pdf2image==1.16.3
+pillow==10.1.0
+
+# Audio processing
+pyaudio==0.2.13
+websockets==11.0.3
+sounddevice==0.4.6
+soundfile==0.12.1
+
+# UI
+streamlit==1.28.0
+
+# Utilities
+numpy==1.24.3
+pandas==2.1.1
+tqdm==4.66.1

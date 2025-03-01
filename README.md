@@ -2,8 +2,6 @@
 
 A multimodal LLM and RAG-powered document chat application designed specifically for Blind and Low Vision (BLV) users.
 
-![BLV Document Chat](https://via.placeholder.com/800x400?text=BLV+Document+Chat)
-
 ## Features
 
 - **Document Processing**: Extract text, formatting details, images, figures, and charts from various document types (PDF, DOCX, TXT)
@@ -21,7 +19,7 @@ A multimodal LLM and RAG-powered document chat application designed specifically
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/blv_doc_chat.git
+git clone https://github.com/abhinav30219/blv_doc_chat.git
 cd blv_doc_chat
 ```
 

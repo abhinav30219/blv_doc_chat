@@ -99,6 +99,8 @@ class StreamlitUI:
             st.session_state.continuous_listening = False
         if "current_page_announced" not in st.session_state:
             st.session_state.current_page_announced = False
+        if "processed_files" not in st.session_state:
+            st.session_state.processed_files = set()
         
         # Start continuous listening if not already active
         if self.voice_enabled and not st.session_state.continuous_listening:
@@ -267,10 +269,13 @@ class StreamlitUI:
             st.header("Upload Document")
             uploaded_file = st.file_uploader(
                 "Upload a document",
-                type=[ext[1:] for ext in SUPPORTED_DOCUMENT_TYPES]
+                type=[ext[1:] for ext in SUPPORTED_DOCUMENT_TYPES],
+                key="document_uploader"
             )
             
-            if uploaded_file is not None:
+            # Reset processed files when a new file is uploaded
+            if uploaded_file is not None and uploaded_file.name not in st.session_state.processed_files:
+                # Show process button only for files that haven't been processed
                 if st.button("Process Document"):
                     with st.spinner("Processing document..."):
                         # Save uploaded file
@@ -287,6 +292,9 @@ class StreamlitUI:
                             # Update session state
                             st.session_state.current_document_id = document_id
                             st.session_state.documents = self.rag_manager.list_documents()
+                            
+                            # Mark this file as processed
+                            st.session_state.processed_files.add(uploaded_file.name)
                             
                             # Add system message
                             st.session_state.messages.append({

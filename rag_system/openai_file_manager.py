@@ -222,18 +222,17 @@ class OpenAIFileManager:
                 logger.warning(f"No file found for document {document_id}")
                 return None
             
-            # Create assistant
+            # Create assistant with file_search tool and file_id in tool_resources
             assistant = self.client.beta.assistants.create(
                 name=name,
                 instructions=instructions,
                 model=model,
-                tools=[{"type": "file_search"}]  # Changed from "retrieval" to "file_search"
-            )
-            
-            # Attach file to assistant after creation
-            self.client.beta.assistants.files.create(
-                assistant_id=assistant.id,
-                file_id=file_id
+                tools=[{"type": "file_search"}],
+                tool_resources={
+                    "file_search": {
+                        "file_ids": [file_id]
+                    }
+                }
             )
             
             # Update metadata

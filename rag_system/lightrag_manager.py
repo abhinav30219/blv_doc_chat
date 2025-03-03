@@ -1,22 +1,19 @@
 """
-LightRAG manager for storing and retrieving document content.
+SimpleRAG manager for storing and retrieving document content.
+This is a simplified version that doesn't rely on LightRAG for Streamlit deployment.
 """
 
 import os
 import json
-import asyncio
+import tempfile
 from typing import Dict, List, Any, Optional, Union
 import numpy as np
 import openai
 import sys
+import uuid
 
 # Add the parent directory to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Import LightRAG
-from lightrag import LightRAG, QueryParam
-from lightrag.llm.openai import openai_complete_if_cache, openai_embed
-from lightrag.utils import EmbeddingFunc
 
 from config import (
     RAG_WORKING_DIR,
@@ -314,11 +311,12 @@ class SimpleRAG:
 
 class LightRAGManager:
     """
-    Manager for LightRAG to store and retrieve document content.
+    Manager for SimpleRAG to store and retrieve document content.
+    This is a simplified version that doesn't rely on LightRAG for Streamlit deployment.
     """
     
     def __init__(self):
-        """Initialize the LightRAG manager."""
+        """Initialize the SimpleRAG manager."""
         # Ensure working directory exists
         if not os.path.exists(RAG_WORKING_DIR):
             os.makedirs(RAG_WORKING_DIR)
@@ -336,61 +334,9 @@ class LightRAGManager:
                 logger.error(f"Error initializing OpenAI file manager: {e}")
                 logger.warning("OpenAI file integration disabled")
         
-        # Initialize LightRAG
-        try:
-            # Define embedding function
-            async def embedding_func(texts: list[str]) -> np.ndarray:
-                return await openai_embed(
-                    texts,
-                    model=EMBEDDING_MODEL,
-                    api_key=OPENAI_API_KEY
-                )
-            
-            # Define LLM function
-            async def llm_model_func(
-                prompt, system_prompt=None, history_messages=[], keyword_extraction=False, **kwargs
-            ) -> str:
-                return await openai_complete_if_cache(
-                    LLM_MODEL,
-                    prompt,
-                    system_prompt=system_prompt,
-                    history_messages=history_messages,
-                    api_key=OPENAI_API_KEY,
-                    **kwargs
-                )
-            
-            # Get embedding dimension
-            async def get_embedding_dim():
-                test_text = ["This is a test sentence."]
-                embedding = await embedding_func(test_text)
-                embedding_dim = embedding.shape[1]
-                return embedding_dim
-            
-            # Run in event loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            embedding_dimension = loop.run_until_complete(get_embedding_dim())
-            
-            # Initialize LightRAG
-            self.rag = LightRAG(
-                working_dir=RAG_WORKING_DIR,
-                llm_model_func=llm_model_func,
-                embedding_func=EmbeddingFunc(
-                    embedding_dim=embedding_dimension,
-                    max_token_size=8192,
-                    func=embedding_func
-                ),
-                chunk_token_size=CHUNK_TOKEN_SIZE,
-                chunk_overlap_token_size=CHUNK_OVERLAP_TOKEN_SIZE,
-                tiktoken_model_name="gpt-4"  # Use a model name that tiktoken recognizes
-            )
-            
-            logger.info("LightRAG initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing LightRAG: {e}")
-            # Fallback to SimpleRAG
-            logger.warning("Falling back to SimpleRAG")
-            self.rag = SimpleRAG(working_dir=RAG_WORKING_DIR)
+        # Initialize SimpleRAG
+        logger.info("Using SimpleRAG for document storage and retrieval")
+        self.rag = SimpleRAG(working_dir=RAG_WORKING_DIR)
         
         # Document metadata storage
         self.document_metadata = {}

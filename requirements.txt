@@ -3,7 +3,8 @@ python-dotenv==1.0.1
 langchain==0.0.267
 langchain-openai==0.0.2
 openai==1.65.1  # Updated for assistants API and audio features
-lightrag-hku==1.2.2
+# lightrag-hku==1.2.2  # Removed for simplified deployment
+pipmaster==0.1.0  # Added for deployment
 pydantic==2.10.6
 fastapi==0.104.1
 uvicorn==0.23.2

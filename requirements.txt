@@ -66,7 +66,6 @@ hyperframe==6.1.0
 hyppo==0.4.0
 idna==3.10
 importlib-metadata==6.11.0
-ipython==9.0.0
 ipython_pygments_lexers==1.1.1
 jedi==0.19.2
 Jinja2==3.1.5

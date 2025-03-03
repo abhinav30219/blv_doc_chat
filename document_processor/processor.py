@@ -46,6 +46,9 @@ from config import (
 )
 from utils import (
     logger,
+    pipeline_logger,
+    audio_logger,
+    PipelineTimer,
     get_file_extension,
     get_temp_file_path,
     create_document_metadata
@@ -71,66 +74,78 @@ class DocumentProcessor:
         Returns:
             Dict containing document metadata, text content, and image data
         """
-        extension = get_file_extension(file_path)
-        
-        if extension not in SUPPORTED_DOCUMENT_TYPES:
-            raise ValueError(f"Unsupported document type: {extension}")
-        
-        logger.info(f"Processing document: {file_path}")
-        
-        if extension in ['.pdf']:
-            return self._process_pdf(file_path)
-        elif extension in ['.docx', '.doc']:
-            return self._process_docx(file_path)
-        elif extension in ['.txt']:
-            return self._process_txt(file_path)
-        else:
-            raise ValueError(f"Unsupported document type: {extension}")
+        with PipelineTimer("Document Processing"):
+            extension = get_file_extension(file_path)
+            
+            if extension not in SUPPORTED_DOCUMENT_TYPES:
+                raise ValueError(f"Unsupported document type: {extension}")
+            
+            if pipeline_logger:
+                pipeline_logger.info(f"Document received: {os.path.basename(file_path)} ({extension})")
+            
+            if extension in ['.pdf']:
+                return self._process_pdf(file_path)
+            elif extension in ['.docx', '.doc']:
+                return self._process_docx(file_path)
+            elif extension in ['.txt']:
+                return self._process_txt(file_path)
+            else:
+                raise ValueError(f"Unsupported document type: {extension}")
     
     def _process_pdf(self, file_path: str) -> Dict[str, Any]:
         """Process a PDF document."""
-        logger.info(f"Processing PDF: {file_path}")
-        
-        # Extract text and structure using unstructured
-        elements = partition_pdf(
-            filename=file_path,
-            extract_images_in_pdf=True,
-            infer_table_structure=True,
-            chunking_strategy="by_title",
-            max_characters=4000,
-            new_after_n_chars=3800,
-            combine_text_under_n_chars=2000,
-        )
-        
-        # Extract images using pdf2image
-        images_data = self._extract_images_from_pdf(file_path)
-        
-        # Get document metadata
-        pdf_reader = pypdf.PdfReader(file_path)
-        num_pages = len(pdf_reader.pages)
-        title = os.path.basename(file_path)
-        
-        # Extract document structure using LLM
-        sections = self._extract_document_structure(elements)
-        
-        # Create document metadata
-        metadata = create_document_metadata(
-            title=title,
-            file_path=file_path,
-            num_pages=num_pages,
-            sections=sections,
-            images=images_data
-        )
-        
-        # Create full document content
-        document_content = {
-            "metadata": metadata,
-            "elements": [self._element_to_dict(element) for element in elements],
-            "images": images_data
-        }
-        
-        logger.info(f"Processed PDF: {file_path}")
-        return document_content
+        with PipelineTimer("PDF Processing"):
+            # Extract text and structure using unstructured
+            with PipelineTimer("Text Extraction"):
+                elements = partition_pdf(
+                    filename=file_path,
+                    extract_images_in_pdf=True,
+                    infer_table_structure=True,
+                    chunking_strategy="by_title",
+                    max_characters=4000,
+                    new_after_n_chars=3800,
+                    combine_text_under_n_chars=2000,
+                )
+                if pipeline_logger:
+                    pipeline_logger.info(f"Extracted {len(elements)} text elements from PDF")
+            
+            # Extract images using pdf2image
+            with PipelineTimer("Image Processing"):
+                images_data = self._extract_images_from_pdf(file_path)
+                if pipeline_logger:
+                    pipeline_logger.info(f"Extracted {len(images_data)} images from PDF")
+            
+            # Get document metadata
+            pdf_reader = pypdf.PdfReader(file_path)
+            num_pages = len(pdf_reader.pages)
+            title = os.path.basename(file_path)
+            
+            # Extract document structure using LLM
+            with PipelineTimer("Document Structure Extraction"):
+                sections = self._extract_document_structure(elements)
+                if pipeline_logger:
+                    pipeline_logger.info(f"Extracted {len(sections)} sections from document structure")
+            
+            # Create document metadata
+            metadata = create_document_metadata(
+                title=title,
+                file_path=file_path,
+                num_pages=num_pages,
+                sections=sections,
+                images=images_data
+            )
+            
+            # Create full document content
+            document_content = {
+                "metadata": metadata,
+                "elements": [self._element_to_dict(element) for element in elements],
+                "images": images_data
+            }
+            
+            if pipeline_logger:
+                pipeline_logger.info(f"PDF processing complete: {title} ({num_pages} pages, {len(sections)} sections, {len(images_data)} images)")
+            
+            return document_content
     
     def _process_docx(self, file_path: str) -> Dict[str, Any]:
         """Process a DOCX document."""
@@ -208,8 +223,6 @@ class DocumentProcessor:
     
     def _extract_images_from_pdf(self, file_path: str) -> List[Dict[str, Any]]:
         """Extract images from a PDF document."""
-        logger.info(f"Extracting images from PDF: {file_path}")
-        
         images_data = []
         
         # Convert PDF pages to images
@@ -234,7 +247,6 @@ class DocumentProcessor:
                 "description": description
             })
         
-        logger.info(f"Extracted {len(images_data)} images from PDF: {file_path}")
         return images_data
     
     def _extract_images_from_docx(self, file_path: str) -> List[Dict[str, Any]]:

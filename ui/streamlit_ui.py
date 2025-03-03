@@ -26,7 +26,7 @@ from config import (
     VOICE_VOLUME,
     VOICE_INTERRUPTION_ENABLED
 )
-from utils import logger, get_file_extension
+from utils import logger, pipeline_logger, PipelineTimer, get_file_extension
 from document_processor.processor import DocumentProcessor
 from rag_system.lightrag_manager import LightRAGManager
 from voice_interface.openai_voice import OpenAIVoiceInterface
@@ -67,7 +67,8 @@ class StreamlitUI:
     
     def run(self):
         """Run the Streamlit UI."""
-        logger.info("Running Streamlit UI")
+        if pipeline_logger:
+            pipeline_logger.info("Starting Streamlit UI")
         
         # Page config is set in app.py
         
@@ -83,32 +84,51 @@ class StreamlitUI:
             """, unsafe_allow_html=True)
         
         # Initialize session state
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
-        if "current_document_id" not in st.session_state:
-            st.session_state.current_document_id = None
-        if "documents" not in st.session_state:
-            st.session_state.documents = []
-        if "recording" not in st.session_state:
-            st.session_state.recording = False
-        if "audio_path" not in st.session_state:
-            st.session_state.audio_path = None
-        if "voice_mode_active" not in st.session_state:
-            st.session_state.voice_mode_active = self.voice_enabled
-        if "continuous_listening" not in st.session_state:
-            st.session_state.continuous_listening = False
-        if "current_page_announced" not in st.session_state:
-            st.session_state.current_page_announced = False
-        if "processed_files" not in st.session_state:
-            st.session_state.processed_files = set()
+        with PipelineTimer("Session State Initialization"):
+            if "messages" not in st.session_state:
+                st.session_state.messages = []
+            if "current_document_id" not in st.session_state:
+                st.session_state.current_document_id = None
+            if "documents" not in st.session_state:
+                st.session_state.documents = []
+            if "recording" not in st.session_state:
+                st.session_state.recording = False
+            if "audio_path" not in st.session_state:
+                st.session_state.audio_path = None
+            if "voice_mode_active" not in st.session_state:
+                st.session_state.voice_mode_active = self.voice_enabled
+            if "continuous_listening" not in st.session_state:
+                st.session_state.continuous_listening = False
+            if "current_page_announced" not in st.session_state:
+                st.session_state.current_page_announced = False
+            if "processed_files" not in st.session_state:
+                st.session_state.processed_files = set()
+            # Processing state flags
+            if "processing_document" not in st.session_state:
+                st.session_state.processing_document = False
+            if "processing_query" not in st.session_state:
+                st.session_state.processing_query = False
+            if "processing_start_time" not in st.session_state:
+                st.session_state.processing_start_time = 0
+            if "announcement_made" not in st.session_state:
+                st.session_state.announcement_made = False
+            if "follow_up_announcement_made" not in st.session_state:
+                st.session_state.follow_up_announcement_made = False
+            
+            if pipeline_logger:
+                pipeline_logger.info("Session state initialized")
         
-        # Start continuous listening if not already active
-        if self.voice_enabled and not st.session_state.continuous_listening:
-            self._start_continuous_voice_mode()
+        # Continuous listening disabled for stability
+        # if self.voice_enabled and not st.session_state.continuous_listening:
+        #     self._start_continuous_voice_mode()
         
         # Main layout
-        self._render_sidebar()
-        self._render_main_content()
+        with PipelineTimer("UI Rendering"):
+            self._render_sidebar()
+            self._render_main_content()
+            
+            if pipeline_logger:
+                pipeline_logger.info("UI rendered")
         
         # Announce page content if voice mode is active
         if self.voice_enabled and not st.session_state.current_page_announced:
@@ -127,8 +147,6 @@ class StreamlitUI:
                 transcription_callback=self._handle_voice_transcription,
                 command_callback=self._handle_voice_command
             )
-            
-            logger.info("Continuous voice mode started")
         except Exception as e:
             logger.error(f"Error starting continuous voice mode: {e}")
             st.error(f"Error starting voice mode: {str(e)}")
@@ -141,8 +159,6 @@ class StreamlitUI:
             
             # Set session state
             st.session_state.continuous_listening = False
-            
-            logger.info("Continuous voice mode stopped")
         except Exception as e:
             logger.error(f"Error stopping continuous voice mode: {e}")
     
@@ -153,8 +169,6 @@ class StreamlitUI:
         Args:
             transcript: Transcribed text
         """
-        logger.info(f"Voice transcription: {transcript}")
-        
         # Process as user input
         if transcript and st.session_state.current_document_id:
             # Add user message
@@ -162,9 +176,20 @@ class StreamlitUI:
             
             # Process query
             try:
+                # Use selected document IDs for query
+                if "selected_document_ids" in st.session_state and st.session_state.selected_document_ids:
+                    document_ids = st.session_state.selected_document_ids
+                    if pipeline_logger:
+                        pipeline_logger.info(f"Voice query across {len(document_ids)} selected documents")
+                else:
+                    # Fallback to current document ID for backward compatibility
+                    document_ids = [st.session_state.current_document_id] if st.session_state.current_document_id else None
+                    if pipeline_logger:
+                        pipeline_logger.info(f"Voice query for single document: {st.session_state.current_document_id}")
+                
                 response = self.agent_system.process_query(
                     transcript,
-                    st.session_state.current_document_id
+                    document_ids
                 )
                 
                 # Add assistant message
@@ -196,8 +221,6 @@ class StreamlitUI:
             command_type: Type of command
             command_text: Command text
         """
-        logger.info(f"Voice command: {command_type} - {command_text}")
-        
         if command_type == "search" and st.session_state.current_document_id:
             # Process as search query
             self._handle_voice_transcription(command_text)
@@ -235,6 +258,36 @@ class StreamlitUI:
         if not self.voice_enabled:
             return
         
+        # Check if we're processing a document or query
+        if st.session_state.processing_document:
+            # Document processing announcements
+            current_time = time.time()
+            if not st.session_state.announcement_made:
+                # Initial announcement
+                self.voice_interface.speak("Please wait while I learn from the document you uploaded.")
+                st.session_state.announcement_made = True
+                st.session_state.processing_start_time = current_time
+            elif not st.session_state.follow_up_announcement_made and (current_time - st.session_state.processing_start_time) > 10:
+                # Follow-up announcement after 10 seconds
+                self.voice_interface.speak("Still analyzing your document. This may take a moment.")
+                st.session_state.follow_up_announcement_made = True
+            return
+            
+        elif st.session_state.processing_query:
+            # Query processing announcements
+            current_time = time.time()
+            if not st.session_state.announcement_made:
+                # Initial announcement
+                self.voice_interface.speak("Please wait while I think about your question.")
+                st.session_state.announcement_made = True
+                st.session_state.processing_start_time = current_time
+            elif not st.session_state.follow_up_announcement_made and (current_time - st.session_state.processing_start_time) > 5:
+                # Follow-up announcement after 5 seconds
+                self.voice_interface.speak("Almost done generating your answer.")
+                st.session_state.follow_up_announcement_made = True
+            return
+        
+        # Regular page announcement (only when not processing)
         # Collect page elements
         elements = []
         
@@ -277,7 +330,15 @@ class StreamlitUI:
             if uploaded_file is not None and uploaded_file.name not in st.session_state.processed_files:
                 # Show process button only for files that haven't been processed
                 if st.button("Process Document"):
+                    # Set processing document flag
+                    st.session_state.processing_document = True
+                    st.session_state.announcement_made = False
+                    st.session_state.follow_up_announcement_made = False
+                    
                     with st.spinner("Processing document..."):
+                        if pipeline_logger:
+                            pipeline_logger.info(f"Starting document processing: {uploaded_file.name}")
+                        
                         # Save uploaded file
                         file_path = os.path.join("temp", uploaded_file.name)
                         os.makedirs("temp", exist_ok=True)
@@ -286,21 +347,28 @@ class StreamlitUI:
                         
                         # Process document
                         try:
-                            document_content = self.document_processor.process_document(file_path)
-                            document_id = self.rag_manager.add_document(document_content)
+                            with PipelineTimer("Document Processing"):
+                                document_content = self.document_processor.process_document(file_path)
+                                document_id = self.rag_manager.add_document(document_content)
+                                
+                                # Update session state
+                                st.session_state.current_document_id = document_id
+                                st.session_state.documents = self.rag_manager.list_documents()
+                                
+                                # Mark this file as processed
+                                st.session_state.processed_files.add(uploaded_file.name)
+                                
+                                # Add system message
+                                st.session_state.messages.append({
+                                    "role": "system",
+                                    "content": f"Document '{document_content['metadata']['title']}' processed successfully."
+                                })
+                                
+                                if pipeline_logger:
+                                    pipeline_logger.info(f"Document processed successfully: {document_content['metadata']['title']}")
                             
-                            # Update session state
-                            st.session_state.current_document_id = document_id
-                            st.session_state.documents = self.rag_manager.list_documents()
-                            
-                            # Mark this file as processed
-                            st.session_state.processed_files.add(uploaded_file.name)
-                            
-                            # Add system message
-                            st.session_state.messages.append({
-                                "role": "system",
-                                "content": f"Document '{document_content['metadata']['title']}' processed successfully."
-                            })
+                            # Reset processing flags
+                            st.session_state.processing_document = False
                             
                             # Announce document processed
                             if self.voice_enabled:
@@ -318,33 +386,66 @@ class StreamlitUI:
                             st.error(f"Error processing document: {str(e)}")
                             logger.error(f"Error processing document: {e}")
                             
+                            if pipeline_logger:
+                                pipeline_logger.info(f"Document processing failed: {str(e)}")
+                            
                             # Announce error
                             if self.voice_enabled:
                                 self.voice_interface.speak(f"Error processing document: {str(e)}")
             
             # Document selection
             if st.session_state.documents:
-                st.header("Select Document")
-                document_titles = [doc["title"] for doc in st.session_state.documents]
-                document_ids = [doc["id"] for doc in st.session_state.documents]
-                selected_index = document_titles.index(
-                    self.rag_manager.get_document_metadata(st.session_state.current_document_id)["title"]
-                ) if st.session_state.current_document_id in document_ids else 0
+                st.header("Document Selection")
                 
-                selected_document = st.selectbox(
-                    "Select a document",
-                    document_titles,
-                    index=selected_index
-                )
+                # Initialize selected_document_ids in session state if not present
+                if "selected_document_ids" not in st.session_state:
+                    # Default to all documents selected
+                    st.session_state.selected_document_ids = [doc["id"] for doc in st.session_state.documents]
                 
-                # Update current document
-                selected_document_id = document_ids[document_titles.index(selected_document)]
-                if selected_document_id != st.session_state.current_document_id:
-                    st.session_state.current_document_id = selected_document_id
-                    st.session_state.messages.append({
-                        "role": "system",
-                        "content": f"Switched to document: {selected_document}"
-                    })
+                # Add "Select All" and "Deselect All" buttons
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Select All"):
+                        st.session_state.selected_document_ids = [doc["id"] for doc in st.session_state.documents]
+                        st.rerun()
+                with col2:
+                    if st.button("Deselect All"):
+                        st.session_state.selected_document_ids = []
+                        st.rerun()
+                
+                # Create checkboxes for each document
+                st.write("Select documents to include in search:")
+                for doc in st.session_state.documents:
+                    doc_selected = st.checkbox(
+                        doc["title"],
+                        value=doc["id"] in st.session_state.selected_document_ids,
+                        key=f"doc_checkbox_{doc['id']}"
+                    )
+                    
+                    # Update selected_document_ids based on checkbox state
+                    if doc_selected and doc["id"] not in st.session_state.selected_document_ids:
+                        st.session_state.selected_document_ids.append(doc["id"])
+                    elif not doc_selected and doc["id"] in st.session_state.selected_document_ids:
+                        st.session_state.selected_document_ids.remove(doc["id"])
+                
+                # Set current document for backward compatibility
+                if st.session_state.selected_document_ids:
+                    if st.session_state.current_document_id not in st.session_state.selected_document_ids:
+                        st.session_state.current_document_id = st.session_state.selected_document_ids[0]
+                        
+                        # Get document title
+                        current_doc_title = "Unknown document"
+                        for doc in st.session_state.documents:
+                            if doc["id"] == st.session_state.current_document_id:
+                                current_doc_title = doc["title"]
+                                break
+                        
+                        if pipeline_logger:
+                            pipeline_logger.info(f"Set current document to: {current_doc_title}")
+                else:
+                    st.session_state.current_document_id = None
+                    if pipeline_logger:
+                        pipeline_logger.info("No documents selected")
             
             # Document info
             if st.session_state.current_document_id:
@@ -358,14 +459,15 @@ class StreamlitUI:
             
             # Accessibility options
             st.header("Accessibility Options")
-            voice_enabled = st.checkbox("Enable voice input/output", value=self.voice_enabled)
+            voice_enabled = st.checkbox("Enable voice output", value=self.voice_enabled)
             if voice_enabled != self.voice_enabled:
                 self.voice_enabled = voice_enabled
-                if voice_enabled:
-                    self._start_continuous_voice_mode()
-                    st.session_state.current_page_announced = False
-                else:
-                    self._stop_continuous_voice_mode()
+                # Voice input disabled for stability
+                # if voice_enabled:
+                #     self._start_continuous_voice_mode()
+                #     st.session_state.current_page_announced = False
+                # else:
+                #     self._stop_continuous_voice_mode()
                 st.rerun()
             
             if voice_enabled:
@@ -382,15 +484,6 @@ class StreamlitUI:
             # Help
             st.header("Help")
             st.markdown("""
-            **Voice Commands:**
-            - "Stop" or "Pause": Stop the current speech
-            - "Continue": Continue with the previous information
-            - "Search for..." or "Find...": Search the document
-            - "Read document": Have the current document read aloud
-            - "Read page": Have the current page/section read aloud
-            - "Describe interface": Get a description of the current interface
-            - "Help": Hear this help information
-            
             **Text Commands:**
             - `help`: Show help
             - `clear_history`: Clear conversation history
@@ -399,8 +492,7 @@ class StreamlitUI:
             - Upload a document to start chatting
             - Ask questions about the document
             - Ask about specific locations in the document
-            - Voice mode is activated by default for hands-free operation
-            - You can interrupt the system by speaking at any time
+            - Enable voice output to have responses read aloud
             """)
     
     def _render_main_content(self):
@@ -417,81 +509,8 @@ class StreamlitUI:
             # Text input
             user_input = st.chat_input("Ask a question about the document...")
             
-            # Voice controls
-            st.header("Voice Controls")
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                if not st.session_state.continuous_listening:
-                    if st.button("Start Voice Mode"):
-                        self._start_continuous_voice_mode()
-                        st.session_state.current_page_announced = False
-                        st.rerun()
-                else:
-                    if st.button("Stop Voice Mode"):
-                        self._stop_continuous_voice_mode()
-                        st.rerun()
-            
-            # Manual voice recording (as backup)
-            with col2:
-                if not st.session_state.recording:
-                    if st.button("Record Question"):
-                        st.session_state.recording = True
-                        self.voice_interface.start_recording()
-                        st.rerun()
-                else:
-                    if st.button("Stop Recording"):
-                        st.session_state.recording = False
-                        audio_path = self.voice_interface.stop_recording()
-                        st.session_state.audio_path = audio_path
-                        st.rerun()
-            
-            # Process manual voice recording
-            if st.session_state.audio_path:
-                with st.spinner("Transcribing audio..."):
-                    try:
-                        # Run speech-to-text in a separate thread
-                        loop = asyncio.new_event_loop()
-                        
-                        def run_async_speech_to_text():
-                            try:
-                                asyncio.set_event_loop(loop)
-                                return loop.run_until_complete(
-                                    self.voice_interface.speech_to_text(st.session_state.audio_path)
-                                )
-                            except Exception as e:
-                                logger.error(f"Error in speech-to-text thread: {e}")
-                                return f"Error transcribing audio: {str(e)}"
-                        
-                        thread = threading.Thread(target=run_async_speech_to_text)
-                        thread.start()
-                        thread.join(timeout=10)  # Add timeout to prevent hanging
-                        
-                        if thread.is_alive():
-                            logger.warning("Speech-to-text thread timed out")
-                            transcription = "Sorry, the audio transcription timed out. Please try again."
-                        else:
-                            # Get transcription
-                            try:
-                                transcription = loop.run_until_complete(
-                                    self.voice_interface.speech_to_text(st.session_state.audio_path)
-                                )
-                            except Exception as e:
-                                logger.error(f"Error getting transcription: {e}")
-                                transcription = "Sorry, there was an error transcribing the audio."
-                        
-                        # Process the transcription
-                        self._handle_voice_transcription(transcription)
-                    except Exception as e:
-                        logger.error(f"Error processing voice input: {e}")
-                        st.error(f"Error processing voice input: {str(e)}")
-                        
-                        # Announce error
-                        if self.voice_enabled:
-                            self.voice_interface.speak(f"Error processing voice input: {str(e)}")
-                    finally:
-                        # Clear audio path
-                        st.session_state.audio_path = None
+            # Voice recording disabled for stability
+            st.info("Voice recording has been disabled for stability. Please use the text input above to ask questions.")
             
             # Process user input
             if user_input:
@@ -502,20 +521,46 @@ class StreamlitUI:
                 with st.chat_message("user"):
                     st.markdown(user_input)
                 
+                # Set processing query flag
+                st.session_state.processing_query = True
+                st.session_state.announcement_made = False
+                st.session_state.follow_up_announcement_made = False
+                
+                if pipeline_logger:
+                    pipeline_logger.info(f"Processing query: '{user_input[:50]}{'...' if len(user_input) > 50 else ''}'")
+                
                 # Process query
                 with st.spinner("Thinking..."):
                     try:
-                        response = self.agent_system.process_query(
-                            user_input,
-                            st.session_state.current_document_id
-                        )
-                        
-                        # Add assistant message
-                        st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
-                        
-                        # Display assistant message
-                        with st.chat_message("assistant"):
-                            st.markdown(response["answer"])
+                        with PipelineTimer("Query Processing"):
+                            # Use selected document IDs for query
+                            if "selected_document_ids" in st.session_state and st.session_state.selected_document_ids:
+                                document_ids = st.session_state.selected_document_ids
+                                if pipeline_logger:
+                                    pipeline_logger.info(f"Querying across {len(document_ids)} selected documents")
+                            else:
+                                # Fallback to current document ID for backward compatibility
+                                document_ids = [st.session_state.current_document_id] if st.session_state.current_document_id else None
+                                if pipeline_logger:
+                                    pipeline_logger.info(f"Querying single document: {st.session_state.current_document_id}")
+                            
+                            response = self.agent_system.process_query(
+                                user_input,
+                                document_ids
+                            )
+                            
+                            # Reset processing flags
+                            st.session_state.processing_query = False
+                            
+                            # Add assistant message
+                            st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
+                            
+                            # Display assistant message
+                            with st.chat_message("assistant"):
+                                st.markdown(response["answer"])
+                            
+                            if pipeline_logger:
+                                pipeline_logger.info(f"Query processed successfully ({len(response['answer'])} chars)")
                         
                         # Automatically speak the response if voice mode is enabled
                         if self.voice_enabled:
@@ -530,6 +575,9 @@ class StreamlitUI:
                         # Display error message
                         with st.chat_message("assistant"):
                             st.markdown(error_message)
+                        
+                        if pipeline_logger:
+                            pipeline_logger.info(f"Query processing failed: {str(e)}")
                         
                         # Speak error message if voice mode is enabled
                         if self.voice_enabled:

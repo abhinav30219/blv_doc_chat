@@ -12,7 +12,7 @@ import sounddevice as sd
 import soundfile as sf
 from typing import Optional, Tuple, List, Callable, Dict, Any
 
-from utils import logger, get_temp_file_path
+from utils import logger, audio_logger, get_temp_file_path
 
 def record_with_vad(
     sample_rate: int,
@@ -47,7 +47,7 @@ def record_with_vad(
         # Start recording
         def callback(indata, frames, time_info, status):
             if status:
-                logger.warning(f"Audio recording status: {status}")
+                pass  # Removed audio status logging
             
             # Add data to buffer
             audio_buffer.append(indata.copy())
@@ -107,7 +107,6 @@ def record_with_vad(
         if is_speech and last_speech_time - speech_start_time >= min_speech_duration:
             # Combine audio buffer
             if not audio_buffer:
-                logger.warning("No audio recorded")
                 return None
             
             try:
@@ -117,7 +116,6 @@ def record_with_vad(
                 output_path = get_temp_file_path("vad_recording", ".wav")
                 sf.write(output_path, audio_data, sample_rate)
                 
-                logger.info(f"VAD recording saved to {output_path}")
                 return output_path
             except Exception as e:
                 logger.error(f"Error processing VAD audio data: {e}")
@@ -140,8 +138,6 @@ async def continuous_listening_worker(
         interface: OpenAIVoiceInterface instance
         loop: Asyncio event loop
     """
-    logger.info("Continuous listening worker started")
-    
     # Set up voice activity detection parameters
     vad_threshold = 0.02  # Adjust based on testing
     silence_duration = 1.0  # Seconds of silence to consider end of speech
@@ -208,13 +204,11 @@ async def continuous_listening_worker(
                 
                 # If too many errors in a short time, take a longer break
                 if interface.error_count > 3:
-                    logger.warning(f"Too many errors in continuous listening worker, pausing for 5 seconds")
                     time.sleep(5)
                 else:
                     time.sleep(1)  # Prevent tight loop on error
     
     finally:
-        logger.info("Continuous listening worker stopped")
         interface.continuous_listening = False
 
 async def continuous_listening_worker_with_audio_model(
@@ -228,8 +222,6 @@ async def continuous_listening_worker_with_audio_model(
         interface: OpenAIVoiceInterface instance
         loop: Asyncio event loop
     """
-    logger.info("Continuous listening worker with audio model started")
-    
     # Set up voice activity detection parameters
     vad_threshold = 0.02  # Adjust based on testing
     silence_duration = 1.0  # Seconds of silence to consider end of speech
@@ -276,11 +268,9 @@ async def continuous_listening_worker_with_audio_model(
                 
                 # If too many errors in a short time, take a longer break
                 if interface.error_count > 3:
-                    logger.warning(f"Too many errors in continuous listening worker with audio model, pausing for 5 seconds")
                     time.sleep(5)
                 else:
                     time.sleep(1)  # Prevent tight loop on error
     
     finally:
-        logger.info("Continuous listening worker with audio model stopped")
         interface.continuous_listening = False

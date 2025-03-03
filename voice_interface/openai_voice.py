@@ -35,7 +35,7 @@ from config import (
     OPENAI_CHAT_MODEL,
     USE_AUDIO_MODEL
 )
-from utils import logger, get_temp_file_path, encode_audio_to_base64, decode_base64_to_audio
+from utils import logger, audio_logger, get_temp_file_path, encode_audio_to_base64, decode_base64_to_audio
 from voice_interface.openai_voice_utils import (
     record_with_vad,
     continuous_listening_worker,
@@ -97,8 +97,6 @@ class OpenAIVoiceInterface:
         
         if style is not None:
             self.voice_style = style
-        
-        logger.info(f"Voice properties set: speed={self.voice_speed}, volume={self.voice_volume}, style={self.voice_style}")
     
     def text_to_speech(self, text: str, voice_style: Optional[str] = None) -> str:
         """
@@ -113,7 +111,6 @@ class OpenAIVoiceInterface:
         """
         # Skip empty text
         if not text or not text.strip():
-            logger.warning("Attempted to convert empty text to speech, ignoring")
             return ""
             
         # Sanitize text to prevent issues
@@ -121,11 +118,8 @@ class OpenAIVoiceInterface:
         
         # Limit text length to prevent very long audio generation
         if len(text) > 5000:
-            logger.warning(f"Text too long ({len(text)} chars), truncating to 5000 chars")
             text = text[:4997] + "..."
             
-        logger.info(f"Converting text to speech: {text[:50]}...")
-        
         try:
             # Create a temporary file to store the audio
             output_path = get_temp_file_path("tts_output", f".{AUDIO_FORMAT}")
@@ -145,7 +139,6 @@ class OpenAIVoiceInterface:
             # Save the audio to a file
             response.stream_to_file(output_path)
             
-            logger.info(f"Text-to-speech output saved to {output_path}")
             return output_path
         except Exception as e:
             logger.error(f"Error in text-to-speech: {e}")
@@ -171,19 +164,15 @@ class OpenAIVoiceInterface:
                             response_format=AUDIO_FORMAT
                         )
                         simple_response.stream_to_file(output_path)
-                        logger.info(f"Created error message audio: {output_path}")
                         return output_path
                     except Exception as inner_e:
-                        logger.error(f"Error creating error message audio: {inner_e}")
                         # If that fails too, return empty string instead of beeping
                         return ""
                 else:
                     # Too many errors recently, just return empty to avoid error spam
                     self.error_count += 1
-                    logger.warning(f"Suppressing error audio due to frequency (count: {self.error_count})")
                     return ""
             except Exception as fallback_e:
-                logger.error(f"Failed to create error audio: {fallback_e}")
                 return ""
     
     def play_audio(self, audio_path: str, block: bool = True, volume: float = None) -> None:
@@ -197,11 +186,8 @@ class OpenAIVoiceInterface:
         """
         # Skip if no audio path or file doesn't exist
         if not audio_path or not os.path.exists(audio_path):
-            logger.warning(f"Audio file not found or empty path: {audio_path}")
             return
             
-        logger.info(f"Playing audio: {audio_path}")
-        
         # Use lock to prevent multiple simultaneous playbacks
         with self.speaking_lock:
             try:
@@ -233,7 +219,6 @@ class OpenAIVoiceInterface:
                     with self.speaking_lock:
                         self.is_speaking = False
                         self.active_audio_paths.discard(audio_path)
-                        logger.info("Audio playback complete")
                 else:
                     # Start a thread to monitor playback completion
                     def monitor_playback():
@@ -245,7 +230,6 @@ class OpenAIVoiceInterface:
                             with self.speaking_lock:
                                 self.is_speaking = False
                                 self.active_audio_paths.discard(audio_path)
-                                logger.info("Audio playback complete")
                     
                     thread = threading.Thread(target=monitor_playback, daemon=True)
                     thread.start()
@@ -258,7 +242,6 @@ class OpenAIVoiceInterface:
     
     def stop_speaking(self) -> None:
         """Stop current audio playback."""
-        logger.info("Stopping audio playback")
         with self.speaking_lock:
             sd.stop()
             self.is_speaking = False
@@ -323,7 +306,6 @@ class OpenAIVoiceInterface:
         """
         # Skip empty text
         if not text or not text.strip():
-            logger.warning("Attempted to speak empty text, ignoring")
             return
             
         # Sanitize text to prevent issues
@@ -331,7 +313,6 @@ class OpenAIVoiceInterface:
         
         # Limit text length to prevent very long audio generation
         if len(text) > 5000:
-            logger.warning(f"Text too long ({len(text)} chars), truncating to 5000 chars")
             text = text[:4997] + "..."
         
         # Check if we should interrupt current speech
@@ -361,8 +342,6 @@ class OpenAIVoiceInterface:
                 # Put all items back
                 for item in last_items:
                     self.speech_queue.put(item)
-                
-                logger.info(f"Combined speech text with previous item: {combined_text[:50]}...")
             except Exception as e:
                 # If combining fails, just add as new item
                 logger.error(f"Error combining speech text: {e}")
@@ -425,45 +404,63 @@ class OpenAIVoiceInterface:
                 
                 # If too many errors in a short time, take a longer break
                 if self.error_count > 3:
-                    logger.warning(f"Too many errors in speaking worker, pausing for 5 seconds")
                     time.sleep(5)
                 else:
                     time.sleep(1)  # Prevent tight loop on error
     
     def start_recording(self) -> None:
         """Start recording audio."""
-        logger.info("Starting audio recording")
-        
         # Use lock to prevent multiple simultaneous recordings
         with self.recording_lock:
             if self.recording:
-                logger.warning("Recording already in progress")
                 return
             
             try:
+                # Initialize variables
                 self.recording = True
                 self.audio_buffer = []
                 
                 def callback(indata, frames, time, status):
                     """Callback for audio recording."""
-                    if status:
-                        logger.warning(f"Audio recording status: {status}")
-                    self.audio_buffer.append(indata.copy())
+                    try:
+                        if status:
+                            pass
+                        self.audio_buffer.append(indata.copy())
+                    except Exception as cb_e:
+                        logger.error(f"Error in recording callback: {cb_e}")
+                        # Don't crash, just log the error
                 
-                # Start recording
-                self.stream = sd.InputStream(
-                    samplerate=self.sample_rate,
-                    channels=self.channels,
-                    callback=callback
-                )
-                self.stream.start()
+                # Test audio device before starting
+                try:
+                    sd.check_input_settings(
+                        device=None,  # Use default device
+                        channels=self.channels,
+                        samplerate=self.sample_rate
+                    )
+                except Exception as device_e:
+                    logger.error(f"Audio input device check failed: {device_e}")
+                    # Try to continue anyway with default settings
                 
-                logger.info("Audio recording started")
+                # Start recording with robust error handling
+                try:
+                    self.stream = sd.InputStream(
+                        samplerate=self.sample_rate,
+                        channels=self.channels,
+                        callback=callback
+                    )
+                    self.stream.start()
+                except Exception as stream_e:
+                    logger.error(f"Error starting audio stream: {stream_e}")
+                    self.recording = False
+                    self.audio_buffer = []
+                    raise  # Re-raise to be caught by outer try-except
+                
             except Exception as e:
                 self.recording = False
                 logger.error(f"Error starting audio recording: {e}")
                 # Create a dummy audio buffer to prevent crashes
                 self.audio_buffer = []
+                # Return gracefully instead of crashing
     
     def stop_recording(self) -> str:
         """
@@ -472,13 +469,14 @@ class OpenAIVoiceInterface:
         Returns:
             Path to the recorded audio file
         """
-        logger.info("Stopping audio recording")
-        
         # Use lock to prevent race conditions
         with self.recording_lock:
             if not self.recording:
-                logger.warning("No recording in progress")
                 return ""
+            
+            # Initialize variables
+            output_path = ""
+            stream_closed = False
             
             try:
                 # Stop recording
@@ -486,25 +484,34 @@ class OpenAIVoiceInterface:
                     try:
                         self.stream.stop()
                         self.stream.close()
+                        stream_closed = True
                     except Exception as e:
                         logger.error(f"Error stopping audio stream: {e}")
+                        # Continue anyway to try to save any recorded data
                 
+                # Always set recording to false to prevent getting stuck
                 self.recording = False
                 
-                # Combine audio buffer
-                if not self.audio_buffer:
-                    logger.warning("No audio recorded")
+                # Combine audio buffer with robust error handling
+                if not self.audio_buffer or len(self.audio_buffer) == 0:
                     return ""
                 
                 try:
-                    audio_data = np.concatenate(self.audio_buffer)
-                    
-                    # Save audio to file
-                    output_path = get_temp_file_path("recording", ".wav")
-                    sf.write(output_path, audio_data, self.sample_rate)
-                    
-                    logger.info(f"Audio recording saved to {output_path}")
-                    return output_path
+                    # Check if we have valid data
+                    if all(isinstance(chunk, np.ndarray) for chunk in self.audio_buffer):
+                        audio_data = np.concatenate(self.audio_buffer)
+                        
+                        # Verify audio data is valid
+                        if audio_data.size > 0:
+                            # Save audio to file
+                            output_path = get_temp_file_path("recording", ".wav")
+                            sf.write(output_path, audio_data, self.sample_rate)
+                            
+                            return output_path
+                        else:
+                            return ""
+                    else:
+                        return ""
                 except Exception as e:
                     logger.error(f"Error processing audio data: {e}")
                     # Return empty string instead of creating a dummy file
@@ -513,6 +520,14 @@ class OpenAIVoiceInterface:
                 logger.error(f"Error stopping recording: {e}")
                 self.recording = False
                 return ""
+            finally:
+                # Clean up resources
+                if hasattr(self, 'stream') and not stream_closed:
+                    try:
+                        self.stream.stop()
+                        self.stream.close()
+                    except:
+                        pass  # Ignore errors in cleanup
     
     async def speech_to_text(self, audio_path: str) -> str:
         """
@@ -526,11 +541,8 @@ class OpenAIVoiceInterface:
         """
         # Skip if no audio path or file doesn't exist
         if not audio_path or not os.path.exists(audio_path):
-            logger.warning(f"Audio file not found or empty path: {audio_path}")
             return ""
             
-        logger.info(f"Converting speech to text: {audio_path}")
-        
         # Use lock to prevent multiple simultaneous API calls
         async with asyncio.Lock():
             try:
@@ -544,10 +556,8 @@ class OpenAIVoiceInterface:
                 # Extract transcript
                 if transcript and hasattr(transcript, 'text'):
                     transcribed_text = transcript.text
-                    logger.info(f"Transcription: {transcribed_text}")
                     return transcribed_text
                 else:
-                    logger.warning("No transcript received from OpenAI API")
                     return ""
             except Exception as e:
                 logger.error(f"Error in speech-to-text: {e}")
@@ -563,19 +573,15 @@ class OpenAIVoiceInterface:
         Returns:
             Path to the response audio file
         """
-        logger.info(f"Processing audio with GPT-4o audio model: {audio_path}")
-        
         try:
             # Check if audio file exists
             if not audio_path or not os.path.exists(audio_path):
-                logger.warning(f"Audio file not found or empty path: {audio_path}")
                 return ""
             
             # First, get the transcript to add to conversation history
             transcript = await self.speech_to_text(audio_path)
             
             if not transcript:
-                logger.warning("No transcript received, cannot process audio conversation")
                 return ""
             
             # Add user message to conversation history
@@ -610,7 +616,6 @@ class OpenAIVoiceInterface:
                 
                 return response_path
             else:
-                logger.warning("No response received from GPT-4o")
                 return ""
         except Exception as e:
             logger.error(f"Error in audio conversation: {e}")
@@ -679,12 +684,9 @@ class OpenAIVoiceInterface:
             transcription_callback: Callback function to handle transcriptions
             command_callback: Callback function to handle commands (command_type, command_text)
         """
-        logger.info("Starting continuous listening")
-        
         # Use lock to prevent multiple starts
         with self.recording_lock:
             if self.continuous_listening:
-                logger.warning("Continuous listening already in progress")
                 return
             
             # Reset state
@@ -695,13 +697,11 @@ class OpenAIVoiceInterface:
             
             # Start listening thread based on configuration
             if USE_AUDIO_MODEL:
-                logger.info("Using GPT-4o audio preview model for continuous listening")
                 self.listening_thread = threading.Thread(
                     target=self._continuous_listening_worker_with_audio_model_wrapper, 
                     daemon=True
                 )
             else:
-                logger.info("Using standard STT/TTS for continuous listening")
                 self.listening_thread = threading.Thread(
                     target=self._continuous_listening_worker_wrapper, 
                     daemon=True
@@ -714,12 +714,9 @@ class OpenAIVoiceInterface:
     
     def stop_continuous_listening(self) -> None:
         """Stop continuous listening."""
-        logger.info("Stopping continuous listening")
-        
         # Use lock to prevent race conditions
         with self.recording_lock:
             if not self.continuous_listening:
-                logger.warning("Continuous listening not in progress")
                 return
             
             self.continuous_listening = False
@@ -728,8 +725,6 @@ class OpenAIVoiceInterface:
             # Wait for thread to finish
             if self.listening_thread and self.listening_thread.is_alive():
                 self.listening_thread.join(timeout=2)
-            
-            logger.info("Continuous listening stopped")
     
     def _record_with_vad(self, threshold: float, silence_duration: float, min_speech_duration: float) -> Optional[str]:
         """
@@ -784,8 +779,6 @@ class OpenAIVoiceInterface:
         Args:
             elements: List of (element_type, content) tuples
         """
-        logger.info(f"Announcing page content with {len(elements)} elements")
-        
         # Format elements into readable text
         announcement_text = []
         

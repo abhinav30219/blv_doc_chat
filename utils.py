@@ -6,10 +6,11 @@ import os
 import logging
 import json
 import base64
+import time
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union
 
-from config import LOG_LEVEL, LOG_FILE, TEMP_DIR, OUTPUT_DIR
+from config import LOG_LEVEL, LOG_FILE, TEMP_DIR, OUTPUT_DIR, PIPELINE_LOG_ENABLED, AUDIO_LOGGING_ENABLED
 
 # Set up logging
 def setup_logging():
@@ -28,7 +29,99 @@ def setup_logging():
     )
     return logging.getLogger(__name__)
 
+# Set up pipeline-specific logger
+def setup_pipeline_logger():
+    """Set up pipeline-specific logger for tracking document and query processing."""
+    pipeline_logger = logging.getLogger("pipeline")
+    pipeline_logger.setLevel(logging.INFO)
+    
+    # Create a formatter that makes pipeline stages stand out
+    formatter = logging.Formatter('%(asctime)s - [PIPELINE] %(message)s')
+    
+    # Add handlers
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    
+    # Set up filter to only show relevant logs
+    class RelevantLogFilter(logging.Filter):
+        def filter(self, record):
+            # Always show document processing logs
+            if "document processing" in record.getMessage().lower():
+                return True
+            
+            # Show logs related to query processing
+            if "query" in record.getMessage().lower():
+                return True
+                
+            # Show logs related to document selection
+            if "document" in record.getMessage().lower() and ("select" in record.getMessage().lower() or "restrict" in record.getMessage().lower()):
+                return True
+                
+            # Show logs related to errors
+            if "error" in record.getMessage().lower() or "fail" in record.getMessage().lower():
+                return True
+                
+            # Filter out other logs
+            return False
+    
+    # Add filter to console handler
+    console_handler.addFilter(RelevantLogFilter())
+    pipeline_logger.addHandler(console_handler)
+    
+    # Add file handler (without filter to keep all logs in the file)
+    log_dir = os.path.dirname(LOG_FILE)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setFormatter(formatter)
+    pipeline_logger.addHandler(file_handler)
+    
+    return pipeline_logger
+
+# Set up audio logger (disabled by default)
+def setup_audio_logger():
+    """Set up audio-specific logger."""
+    audio_logger = logging.getLogger("audio")
+    
+    if not AUDIO_LOGGING_ENABLED:
+        audio_logger.setLevel(logging.CRITICAL)  # Effectively disable logging
+        return audio_logger
+    
+    audio_logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - [AUDIO] %(message)s')
+    
+    # Add handlers
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    audio_logger.addHandler(console_handler)
+    
+    return audio_logger
+
+# Initialize loggers
 logger = setup_logging()
+pipeline_logger = setup_pipeline_logger() if PIPELINE_LOG_ENABLED else None
+audio_logger = setup_audio_logger()
+
+# Pipeline timing utilities
+class PipelineTimer:
+    """Utility class for timing pipeline stages."""
+    
+    def __init__(self, stage_name):
+        self.stage_name = stage_name
+        self.start_time = None
+    
+    def __enter__(self):
+        self.start_time = time.time()
+        if pipeline_logger:
+            pipeline_logger.info(f"Starting: {self.stage_name}")
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.start_time:
+            elapsed = time.time() - self.start_time
+            if pipeline_logger:
+                pipeline_logger.info(f"Completed: {self.stage_name} (took {elapsed:.2f}s)")
 
 # Create necessary directories
 def create_directories():

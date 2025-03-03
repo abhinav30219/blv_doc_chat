@@ -56,8 +56,10 @@ UI_TITLE = "Document Chat for BLV Users"
 UI_DESCRIPTION = "Chat with your documents using voice or text"
 
 # Logging Settings
-LOG_LEVEL = "DEBUG"
+LOG_LEVEL = "INFO"  # Changed from DEBUG to reduce verbosity
 LOG_FILE = "app.log"
+PIPELINE_LOG_ENABLED = True  # Enable pipeline-specific logging
+AUDIO_LOGGING_ENABLED = False  # Disable audio-related logging
 
 # Paths
 TEMP_DIR = "./temp"

@@ -38,7 +38,7 @@ boto3==1.36.23
 botocore==1.36.23
 httpx==0.27.2
 huggingface-hub==0.29.1
-# hume==0.7.0  # Removed as not being used
+hume==0.7.0
 jinja2==3.1.5
 jsonschema==4.23.0
 nltk==3.9.1

@@ -672,10 +672,17 @@ class LightRAGManager:
                                 
                                 try:
                                     # Execute query with document ID filter
+                                    # Ensure param is a QueryParam object, not a list
+                                    if isinstance(query_param, list):
+                                        # If it's a list, create a new QueryParam
+                                        safe_param = QueryParam(mode=mode, only_need_context=False)
+                                    else:
+                                        safe_param = query_param
+                                        
                                     doc_result = loop.run_until_complete(
                                         self.rag.aquery(
                                             query_text, 
-                                            param=query_param,
+                                            param=safe_param,
                                             ids=doc_id  # Filter by document ID
                                         )
                                     )

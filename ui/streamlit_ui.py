@@ -323,13 +323,14 @@ class StreamlitUI:
             uploaded_file = st.file_uploader(
                 "Upload a document",
                 type=[ext[1:] for ext in SUPPORTED_DOCUMENT_TYPES],
-                key="document_uploader"
+                key="document_uploader",
+                help="Select and upload a pdf document to start interacting"
             )
             
             # Reset processed files when a new file is uploaded
             if uploaded_file is not None and uploaded_file.name not in st.session_state.processed_files:
                 # Show process button only for files that haven't been processed
-                if st.button("Process Document"):
+                if st.button("Process Document", help="Click to process the uploaded document for text analysis."):
                     # Set processing document flag
                     st.session_state.processing_document = True
                     st.session_state.announcement_made = False
@@ -405,11 +406,11 @@ class StreamlitUI:
                 # Add "Select All" and "Deselect All" buttons
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("Select All"):
+                    if st.button("Select All", help="Select all available documents for querying."):
                         st.session_state.selected_document_ids = [doc["id"] for doc in st.session_state.documents]
                         st.rerun()
                 with col2:
-                    if st.button("Deselect All"):
+                    if st.button("Deselect All", help="Deselect all documents to exclude them from queries."):
                         st.session_state.selected_document_ids = []
                         st.rerun()
                 
@@ -419,7 +420,8 @@ class StreamlitUI:
                     doc_selected = st.checkbox(
                         doc["title"],
                         value=doc["id"] in st.session_state.selected_document_ids,
-                        key=f"doc_checkbox_{doc['id']}"
+                        key=f"doc_checkbox_{doc['id']}",
+                        help=f"Check to focus on the document '{doc['title']}' in your search."
                     )
                     
                     # Update selected_document_ids based on checkbox state
@@ -507,7 +509,10 @@ class StreamlitUI:
         # Chat input
         if st.session_state.current_document_id:
             # Text input
-            user_input = st.chat_input("Ask a question about the document...")
+            user_input = st.chat_input(
+                "Ask a question about the document...",
+                help="Type a question about the document and press Enter to submit."
+            )
             
             # Voice recording disabled for stability
             st.info("Voice recording has been disabled for stability. Please use the text input above to ask questions.")

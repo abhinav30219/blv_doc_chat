@@ -1,3 +1,5 @@
 libasound2-dev
 portaudio19-dev
 python3-pyaudio
+poppler-utils
+tesseract-ocr

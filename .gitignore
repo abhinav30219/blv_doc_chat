@@ -28,7 +28,6 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-.venv/
 
 # Cached data
 rag_data/
